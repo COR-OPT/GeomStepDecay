@@ -92,6 +92,25 @@ In the above, `wSol` and `xSol` are the final iterates found by the algorithm,
 `ds` is a history of distances from the solution set (one for each outer loop)
 and `totalEv` is the total number of inner iterations performed.
 
+#### Running the MNIST experiment
+In order to reproduce the sparse logistic regression experiment on the MNIST
+dataset, we offer the script `plot_mnist.jl` together with a `JLD` file
+`mnist_full.jld`. The latter contains the approximate solution found by running
+the full proximal gradient method. To evaluate the performance of the RMBA
+method, make sure `mnist_full.jld` is in the same directory as `plot_mnist.jl`
+and run
 
-\[1\]: Damek Davis, Dmitriy Drusvyatskiy, Vasileios Charisopoulos. *Stochastic
-Algorithms with geometric step decay converge linearly on sharp functions.*
+```bash
+julia -O3 plot_mnist.jl plot_rmba
+```
+
+To evaluate the RDA algorithm with `γ = 0.1`, (see \[2\] for details), type:
+
+```bash
+julia -O3 plot_mnist.jl plot_rda --gamma 0.1
+```
+
+
+\[1\]: Damek Davis, Dmitriy Drusvyatskiy, Vasileios Charisopoulos. *Stochastic Algorithms with geometric step decay converge linearly on sharp functions.*
+
+\[2\]: Lee, Sangkyun, and Stephen J. Wright. *Manifold identification in dual averaging for regularized stochastic online learning.* Journal of Machine Learning Research 13.Jun (2012): 1705-1744.
