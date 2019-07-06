@@ -1,6 +1,6 @@
 # GeomStepDecay
 This repository contains a reference implementation for the Algorithms
-appearing in the paper [\[1\]] for a selection of statistical recovery
+appearing in the paper \[1\] for a selection of statistical recovery
 problems, namely robust phase retrieval and blind deconvolution.
 
 ### Dependencies
