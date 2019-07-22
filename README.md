@@ -112,5 +112,6 @@ julia -O3 plot_mnist.jl plot_rda --gamma 0.1
 
 
 \[1\]: Damek Davis, Dmitriy Drusvyatskiy, Vasileios Charisopoulos. *Stochastic Algorithms with geometric step decay converge linearly on sharp functions.*
+Available [here](https://people.orie.cornell.edu/dsd95/GeometricStepDecay.pdf).
 
 \[2\]: Lee, Sangkyun, and Stephen J. Wright. *Manifold identification in dual averaging for regularized stochastic online learning.* Journal of Machine Learning Research 13.Jun (2012): 1705-1744.
