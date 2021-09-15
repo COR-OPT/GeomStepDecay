@@ -14,8 +14,12 @@ struct PhaseRetrievalProblem
   pfail :: Float64
 end
 
+"""
+  distance_to_solution(problem::PhaseRetrievalProblem, x::Vector{Float64})
 
-function distance_to_minimizer(problem::PhaseRetrievalProblem, x::Vector{Float64})
+Compute the distance of `x` to the solution of a phase retrieval `problem`.
+"""
+function distance_to_solution(problem::PhaseRetrievalProblem, x::Vector{Float64})
   return min(norm(x - problem.x), norm(x + problem.x))
 end
 
@@ -203,7 +207,7 @@ step size. Initialize at a point ``\\delta``-close to the optimum, with
 inner steps, which can adapt to the outer iteration index. λ is either a
 number or callable implementing the inner step size schedule.
 """
-  function pSgd(prob::PrProb, δ, iters, inSched, λ; ρ=0.0, ϵ=1e-16)
+function pSgd(prob::PrProb, δ, iters, inSched, λ; ρ=0.0, ϵ=1e-16)
   inIters = setup_step(inSched); λSched = setup_step(λ)
   ρSched = setup_step(ρ)
   d, m = length(prob.x), length(prob.y)
@@ -220,6 +224,130 @@ number or callable implementing the inner step size schedule.
   end
   return xinit, dists, totalEvals
 end
+
+
+"""
+  proximal_point_step(a::Vector{Float64}, b::Float64, x::Vector{Float64}, λ::Float64)
+
+Compute the proximal point of the function |(a'x)^2 - b| with proximal penalty
+`λ`.
+"""
+function proximal_point_step(
+  a::Vector{Float64}, b::Float64, x::Vector{Float64}, λ::Float64,
+)
+  ip = a'x; a_norm = norm(a)
+  # Possible stationary points.
+  Xs = hcat((
+    x - ( (2 * λ * ip) / (2 * λ * a_norm + 1) ) * a,
+    x - ( (2 * λ * ip) / (2 * λ * a_norm - 1) ) * a,
+    x - ( (ip + sqrt(b)) / a_norm ) * a,
+    x - ( (ip - sqrt(b)) / a_norm ) * a)...)
+  # Index yielding the minimum function value.
+  min_idx = argmin(
+    (abs.((a' * Xs).^2 .- b) .+ (1 / (2 * λ)) .* sum((Xs .- x).^2, dims=1))[:])
+  return Xs[:, min_idx]
+end
+
+
+"""
+  proximal_point_step(a::Vector{Float64}, b::Float64, x::Vector{Float64}, x_base::Vector{Float64}, ρ::Float64, λ::Float64)
+
+Like `proximal_point_step(a, b, x, λ)`, but with an additional penalty of the
+form `(ρ / 2) * |x - x_base|^2`.
+"""
+function proximal_point_step(
+  a::Vector{Float64}, b::Float64, x::Vector{Float64}, x_base::Vector{Float64},
+  ρ::Float64, λ::Float64,
+)
+  weight = (1 / (1 + λ * ρ))
+  return proximal_point_step(a, b, weight * (x + λ * ρ * x_base) , weight * λ)
+end
+
+# Projection to interval [-1, 1].
+proj_one(x) = min(abs(x), 1) * sign(x)
+
+
+"""
+  prox_linear_step(a::Vector{Float64}, b::Float64, x::Vector{Float64}, λ::Float64)
+
+Compute a prox-linear step for the function `|(a'x)^2 - b|` and prox parameter
+`λ`.
+"""
+function prox_linear_step(
+  a::Vector{Float64}, b::Float64, x::Vector{Float64}, λ::Float64,
+)
+  ip = a'x
+  γ = λ * (ip^2 - b)
+  ζ = 2 * λ * ip .* a
+  Δ = proj_one(-γ / (norm(ζ)^2)) .* ζ
+  return x + Δ
+end
+
+function prox_linear_step(
+  a::Vector{Float64}, b::Float64, x::Vector{Float64}, x_base::Vector{Float64},
+  ρ::Float64, λ::Float64,
+)
+  weight = 1 / (1 + λ * ρ)
+  return prox_linear_step(a, b, weight * (x + λ * ρ * x_base), weight * λ)
+end
+
+trunc(x, lb, ub) = max(min(x, ub), lb)
+
+"""
+  truncated_step(a::Vector{Float64}, b::Float64, x::Vector{Float64}, λ::Float64)
+
+Perform one proximal step using a truncated first-order model for the function
+|(a'x)^2 - b| using prox-parameter `λ`.
+"""
+function truncated_step(a::Vector{Float64}, b::Float64, x::Vector{Float64}, λ::Float64)
+  res = (a'x)^2 - b
+  (abs(res) ≤ 1e-15) && return x
+  c = 2 * (a'x) * sign(res) * a
+  return x - λ * trunc(abs(res) / (λ * norm(c)^2), 0, 1.0) * c
+end
+
+"""
+  truncated_step(a::Vector{Float64}, b::Float64, x::Vector{Float64}, x_base::Vector{Float64}, ρ::Float64, λ::Float64)
+
+Like `truncated_step(a, b, x, λ)`, but with an additional quadratic penalty of
+the form `(ρ / 2) * |x - x_base|^2`.
+"""
+function truncated_step(
+  a::Vector{Float64}, b::Float64, x::Vector{Float64}, x_base::Vector{Float64},
+  ρ::Float64, λ::Float64,
+)
+  weight = 1 / (1 + λ * ρ)
+  return truncated_step(a, b, weight * (x + ρ * λ * x_base), weight * λ)
+end
+
+"""
+  subgradient_step(a::Vector{Float64}, b::Float64, x::Vector{Float64}, λ::Float64)
+
+Perform one step of the subgradient method with step size `λ`.
+"""
+function subgradient_step(a::Vector{Float64}, b::Float64, x::Vector{Float64}, λ::Float64)
+  return x - λ * subgradient(x, a, b)
+end
+
+"""
+  subgradient_step(a::Vector{Float64}, b::Float64, x::Vector{Float64}, x_base::Vector{Float64}, ρ::Float64, λ::Float64)
+
+Like `subgradient_step(a, b, x, λ)`, but with an additional quadratic penalty
+`(ρ / 2) * |x - x_base|^2`.
+"""
+function subgradient_step(
+  a::Vector{Float64}, b::Float64, x::Vector{Float64}, x_base::Vector{Float64},
+  ρ::Float64, λ::Float64,
+)
+  weight = 1 / (1 + ρ * λ)
+  return subgradient_step(a, b, weight * (x + λ * ρ * x_base), weight * λ)
+end
+
+
+function _trunc(x, a, b)
+  return max(min(x, b), a)
+end
+
 
 
 #= proximal point update by taking the point with lowest prox value =#
@@ -298,11 +426,6 @@ function sProx(prob::PrProb, delta, iters, inSched, λ; method=:proximal,
     totalEvals += stopTime
   end
   return xinit, dists, totalEvals
-end
-
-
-function _trunc(x, a, b)
-  return max(min(x, b), a)
 end
 
 
