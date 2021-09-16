@@ -1,26 +1,48 @@
 #! /usr/bin/env julia
 
-module RobustPR
+module GeomStepDecay
 
 using Distributions
 using LinearAlgebra
 using Random
 using Statistics
 
-struct PhaseRetrievalProblem
-  A :: Union{Matrix{Float64}, Distribution}
-  y :: Vector{Float64}
-  x :: Vector{Float64}
-  pfail :: Float64
+abstract type OptProblem end
+
+struct PhaseRetrievalProblem <: OptProblem
+  A::Union{Matrix{Float64}, Distribution}
+  y::Vector{Float64}
+  x::Vector{Float64}
+  pfail::Float64
 end
+
+
+struct BilinearSensingProblem <: OptProblem
+  L::Union{Matrix{Float64}, Distribution}
+  R::Union{Matrix{Float64}, Distribution}
+  y::Vector{Float64}
+  w::Vector{Float64}
+  x::Vector{Float64}
+  pfail::Float64
+end
+
 
 """
   distance_to_solution(problem::PhaseRetrievalProblem, x::Vector{Float64})
 
 Compute the distance of `x` to the solution of a phase retrieval `problem`.
 """
-function distance_to_solution(problem::PhaseRetrievalProblem, x::Vector{Float64})
-  return min(norm(x - problem.x), norm(x + problem.x))
+function distance_to_solution(
+  problem::PhaseRetrievalProblem, x::Vector{Float64},
+)
+  return min(norm(x - problem.x), norm(x + problem.x)) / norm(problem.x)
+end
+
+
+function distance_to_solution(
+  problem::BilinearSensingProblem, w::Vector{Float64}, x::Vector{Float64},
+)
+  return norm(w .* x' .- problem.w .* problem.x') / (norm(problem.w) * norm(problem.x))
 end
 
 
@@ -50,6 +72,26 @@ function sample_vectors(problem::PhaseRetrievalProblem, num_samples::Int)
   end
 end
 
+
+function sample_vectors(problem::BilinearSensingProblem, num_samples::Int)
+  if isa(problem.L, Matrix) && isa(problem.R, Matrix)
+    indices = rand(1:length(problem.y), num_samples)
+    return problem.L[indices, :], problem.R[indices, :], problem.y[indices]
+  elseif isa(problem.L, Distribution) && isa(problem.R, Distribution)
+    d1 = length(problem.w); d2 = length(problem.x); p = problem.pfail
+    vectors_left = rand(problem.L, num_samples, d1)
+    vectors_right = rand(problem.R, num_samples, d2)
+    measurements = (vectors_left * problem.w) .* (vectors_right * problem.x)
+    replace!(x -> (rand() ≤ p) ? 10 * randn() : x,
+             measurements)
+    return vectors_left, vectors_right, measurements
+  else
+    throw(ErrorException("problem.L and problem.R must be both matrices " *
+                         "or distributions"))
+  end
+end
+
+
 """
   subgradient(x::Vector{Float64}, a::Vector{Float64}, b::Float64) -> g
 
@@ -59,6 +101,116 @@ function subgradient(
   x::Vector{Float64}, a::Vector{Float64}, b::Float64,
 )
   return 2 * a * (sign((a'x)^2 - b) * (a'x))
+end
+
+
+function mba_template(
+  problem::OptProblem, x₀::Vector{Float64}, step_size::Float64,
+  num_iterations::Int, is_conv::Bool, prox_step::Function,
+)
+  # Generate `num_iterations` samples up-front.
+  samples = sample_vectors(problem, num_iterations)
+  if is_conv
+    running_sum = x₀[:]
+    for k in 1:num_iterations
+      x₀ = prox_step(samples, k, x₀, step_size)
+    end
+    return (1 / (num_iterations + 1)) * running_sum
+  else
+    stop_time = rand(0:num_iterations)
+    for k in 1:stop_time
+      x₀ = prox_step(samples, k, x₀, step_size)
+    end
+    return x₀
+  end
+end
+
+
+function rmba_template(
+  problem::OptProblem, x₀::Vector{Float64}, initial_step_size::Float64,
+  outer_iterations::Int, inner_iterations::Int, is_conv::Bool,
+  prox_step::Function, callback::Function,
+)
+  callback_results = zeros(outer_iterations)
+  for t in 1:outer_iterations
+    step = initial_step_size * 2^(-(t - 1))
+    x₀ = mba(problem, x₀[:], step, inner_iterations, is_conv, prox_step)
+    callback_results[t] = callback(problem, x₀, t)
+  end
+  return x₀, callback_results
+end
+
+
+function pmba_template(
+  problem::OptProblem, x₀::Vector{Float64}, step_size::Float64,
+  prox_penalty::Float64, num_iterations::Int, prox_step::Function,
+)
+  # Proximal center for the updates.
+  x_base = x₀[:]
+  stop_time = rand(0:num_iterations)
+  samples = sample_vectors(problem, stop_time)
+  weight = 1 / (step_size + prox_penalty)
+  for k in 1:stop_time
+    # Including the proximal penalty is equivalent to evaluating
+    # the proximal operator at a nearby point with a slightly different
+    # proximal step.
+    x₀ = prox_step(samples, k,
+                   weight * (step_size * x₀ + prox_penalty * step_size * x_base),
+                   weight * step_size)
+  end
+  return x₀
+end
+
+
+function epmba_template(
+  problem::OptProblem, x₀::Vector{Float64}, step_size::Float64,
+  prox_penalty::Float64, ensemble_radius::Float64, num_repeats::Int,
+  num_iterations::Int, prox_step::Function,
+)
+  ϵ = ensemble_radius
+  Xs = zeros(length(x₀), num_repeats)
+  for i in 1:num_repeats
+    Xs[:, i] = pmba_template(problem, x₀[:], step_size, prox_penalty,
+                             num_iterations, prox_step)
+  end
+  pairwise_dists = pairwise_distance(Xs)
+  most_idx = argmax(vec(sum(pairwise_dists .<= 2 * ϵ, dims=2)))
+  return Xs[:, most_idx]
+end
+
+
+"""
+  rpmba_template(problem::OptProblem, x₀::Vector{Float64}, initial_step_size::Float64,
+                 initial_prox_penalty::Float64, initial_ensemble_radius::Float64,
+                 inner_iterations::Int, outer_iterations::Int, num_repeats::Int,
+                 prox_step::Function, callback::Function) -> (x, callback_results)
+
+Run the RPMBA algorithm on a problem starting from `x₀` and return the final
+iterate as well as a vector of callback results, one per outer iteration.
+
+The `prox_step` argument is a callable that implements a single inner iteration
+for the problem at hand, with signature
+`prox_step(problem, inner_iteration_index, current_point, step_size)`.
+
+On the other hand, `callback(problem, current_point, outer_iteration_index)`
+should produce a single scalar (for example, the distance to the solution).
+"""
+function rpmba_template(
+  problem::OptProblem, x₀::Vector{Float64}, initial_step_size::Float64,
+  initial_prox_penalty::Float64, initial_ensemble_radius::Float64,
+  inner_iterations::Int, outer_iterations::Int, num_repeats::Int,
+  prox_step::Function, callback::Function,
+)
+  callback_results = zeros(outer_iterations)
+  for t in 0:(outer_iterations - 1)
+    ρ = 2^t * initial_prox_penalty
+    α = 2^(-t) * initial_step_size
+    ϵ = 2^(-t) * initial_ensemble_radius
+    x₀ = epmba_template(problem, x₀[:], α, ρ, ϵ, num_repeats, inner_iterations,
+                        prox_step)
+    callback_results[t+1] = callback(problem, x₀, t)
+  end
+  return x₀, callback_results
 end
 
 
@@ -89,6 +241,24 @@ function mba(
       x₀ = prox_step(A[k, :], y[k], x₀, α)
     end
     return x₀
+  end
+end
+
+
+function mba(
+  problem::BilinearSensingProblem, w₀::Vector{Float64}, x₀::Vector{Float64},
+  α::Float64, K::Int, is_conv::Bool, prox_step::Function,
+)
+  # Generate one sample per iteration up front.
+  L, R, y = sample_vectors(problem, K)
+  if is_conv
+    running_sum_w = w₀[:]
+    running_sum_x = x₀[:]
+    for k = 1:K
+      w₀, x₀ = prox_step(L[k, :], R[k, :], y[k], w₀[:], x₀[:], α)
+    end
+    return ((1 / (K + 1)) * running_sum_w, (1 / (K + 1)) * running_sum_x)
+  else
   end
 end
 
