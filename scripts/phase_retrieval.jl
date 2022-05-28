@@ -9,7 +9,8 @@ struct PhaseRetrievalProblem <: GeomStepDecay.OptProblem
   pfail::Float64
 end
 
-function generate_problem(D::Distributions.Distribution, d::Int, pfail::Float64 = 0.0)
+function generate_problem(D::Distributions.Distribution, pfail::Float64 = 0.0)
+  d = length(D)
   return PhaseRetrievalProblem(D, normalize(randn(d)), pfail)
 end
 
@@ -37,7 +38,6 @@ function generate_samples(
   problem::PhaseRetrievalProblem,
   num_samples::Int,
 )
-  d = length(problem.x)
   p = problem.pfail
   vectors = Matrix(rand(problem.A, num_samples)')
   measurements = (vectors * problem.x) .^ 2
@@ -65,7 +65,7 @@ function subgradient_step(
 )
   A, y = generate_samples(problem, batch_size)
   # Subgradient for given batch.
-  subgrad = 2 * A' * (sign.((A * x).^2 .- y) .* A * x)
+  subgrad = (2 / batch_size) * A' * (sign.((A * x).^2 .- y) .* A * x)
   return x - step_size * subgrad
 end
 

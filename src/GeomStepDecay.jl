@@ -76,10 +76,11 @@ function rmba_template(
   is_conv::Bool,
   prox_step::Function,
   callback::Function;
-  stop_condition=nothing,
+  stop_condition::Union{Function, Nothing}=nothing,
 )
-  callback_results = zeros(outer_iterations)
+  callback_results = []
   for t in 1:outer_iterations
+    @debug "Running t = $(t)"
     step = initial_step_size * 2.0^(-(t - 1))
     x₀ = mba_template(
       problem,
@@ -90,7 +91,11 @@ function rmba_template(
       prox_step;
       stop_condition=stop_condition,
     )
-    callback_results[t] = callback(problem, x₀, t)
+    push!(callback_results, callback(problem, x₀, t))
+    if stop_condition(problem, x₀, t)
+      @debug "Stopping early at outer iteration: $(t)"
+      return x₀, callback_results
+    end
   end
   return x₀, callback_results
 end
