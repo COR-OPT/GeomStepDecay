@@ -27,8 +27,9 @@ struct TrialResult
 end
 
 function main(d, pfail, δ, ϵ_stop=1e-15)
+  batch_size = trunc(Int, sqrt(d))
   μ = 1 - 2 * pfail
-  L = sqrt(d)
+  L = sqrt(d / batch_size)
   η = 1.0
   δ_fail = 1 / 3
   ϵ = 1e-5
@@ -37,7 +38,6 @@ function main(d, pfail, δ, ϵ_stop=1e-15)
   @info "T = $T, K = $K, d = $d"
   R = sqrt(δ) * μ
   α₀ = (R / L) * (1 / sqrt(K + 1))
-  batch_size = trunc(Int, sqrt(d))
   callback(problem::PhaseRetrievalProblem, x::Vector{Float64}, t::Int) =
     (dist_real = distance_to_solution(problem, x),
      dist_calc = 2.0^(-t) * R,
