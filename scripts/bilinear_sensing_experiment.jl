@@ -38,18 +38,20 @@ function main(d, pfail, δ, ϵ_stop=1e-15)
   R = sqrt(δ) * μ
   α₀ = (R / L) * (1 / sqrt(K + 1))
   batch_size = trunc(Int, sqrt(d))
-  callback(problem::PhaseRetrievalProblem, x::Vector{Float64}, t::Int) =
-    (dist_real = distance_to_solution(problem, x),
+  callback(problem::BilinearSensingProblem, z::Vector{Float64}, t::Int) =
+    (dist_real = distance_to_solution(problem, z),
      dist_calc = 2.0^(-t) * R,
      iter_ind = t * K * batch_size)
   # Standard normal distribution
-  D = Distributions.MultivariateNormal(d, 1.0)
-  problem = generate_phase_retrieval_problem(D, pfail)
-  step_fn = (p, x, α) -> subgradient_step(p, x, α, batch_size=batch_size)
+  DL = Distributions.MultivariateNormal(d, 1.0)
+  DR = Distributions.MultivariateNormal(d, 1.0)
+  problem = generate_bilinear_sensing_problem(DL, DR, pfail)
+  step_fn = (p, z, α) -> subgradient_step(p, z, α, batch_size=batch_size)
+  w₀ = problem.w + δ * normalize(randn(d))
   x₀ = problem.x + δ * normalize(randn(d))
   _, callback_results = GeomStepDecay.rmba_template(
     problem,
-    x₀,
+    [w₀; x₀],
     α₀,
     5 * T,
     K,
@@ -59,13 +61,13 @@ function main(d, pfail, δ, ϵ_stop=1e-15)
     stop_condition = (p, x, _) -> (distance_to_solution(p, x) ≤ ϵ_stop),
   )
   CSV.write(
-    "phase_retrieval_$(d)_$(@sprintf("%.2f", pfail)).csv",
+    "bilinear_sensing_$(d)_$(@sprintf("%.2f", pfail)).csv",
     DataFrame(callback_results),
   )
 end
 
 settings = ArgParseSettings(
-  description="Run the stochastic subgradient algorithm on phase retrieval.",
+  description="Run the stochastic subgradient algorithm on bilinear sensing.",
 )
 @add_arg_table! settings begin
   "--d"
