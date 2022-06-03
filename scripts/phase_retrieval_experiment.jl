@@ -26,7 +26,7 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, ϵ_stop=1e-15)
+function main(d, pfail, δ, ϵ_stop=(sqrt(d) * 1e-15))
   batch_size = trunc(Int, sqrt(d))
   μ = 1 - 2 * pfail
   L = sqrt(d / batch_size)
