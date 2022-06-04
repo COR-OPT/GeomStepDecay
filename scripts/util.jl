@@ -100,13 +100,11 @@ function generate_samples(
   num_samples::Int,
 )
   p = problem.pfail
-  vectors = Matrix(rand(problem.A, num_samples)')
+  vectors = rand(problem.A, num_samples)'
   measurements = (vectors * problem.x) .^ 2
   # Replace a `p` fraction with large noise.
-  replace!(
-    x -> (rand() <= p) ? 10 * randn().^2 : x,
-    measurements,
-  )
+  num_rep = trunc(Int, p * num_samples)
+  measurements[1:num_rep] .= 10 * randn(num_rep) .^ 2
   return vectors, measurements
 end
 
@@ -126,14 +124,12 @@ function generate_samples(
   num_samples::Int,
 )
   p = problem.pfail
-  vectors_left = Matrix(rand(problem.L, num_samples)')
-  vectors_right = Matrix(rand(problem.R, num_samples)')
+  vectors_left = rand(problem.L, num_samples)'
+  vectors_right = rand(problem.R, num_samples)'
   measurements = (vectors_left * problem.w) .* (vectors_right * problem.x)
   # Replace a `p` fraction with large noise.
-  replace!(
-    x -> (rand() ≤ p) ? 10 * randn() : x,
-    measurements,
-  )
+  num_rep = trunc(Int, p * num_samples)
+  measurements[1:num_rep] .= 10 .* randn(num_samples)
   return vectors_left, vectors_right, measurements
 end
 
