@@ -129,7 +129,7 @@ function generate_samples(
   measurements = (vectors_left * problem.w) .* (vectors_right * problem.x)
   # Replace a `p` fraction with large noise.
   num_rep = trunc(Int, p * num_samples)
-  measurements[1:num_rep] .= 10 .* randn(num_samples)
+  measurements[1:num_rep] .= 10 .* randn(num_rep)
   return vectors_left, vectors_right, measurements
 end
 
