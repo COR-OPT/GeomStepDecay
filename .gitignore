@@ -4,3 +4,6 @@
 deps/deps.jl
 
 tags
+
+*.csv
+*.bak
