@@ -26,12 +26,10 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, ϵ_stop=(sqrt(d) * 1e-15))
-  batch_size = trunc(Int, sqrt(d))
+function main(d, pfail, δ, batch_size, ϵ_stop=(sqrt(d) * 1e-15))
   μ = 1 - 2 * pfail
   L = sqrt(d / batch_size)
-  η = 1.0
-  δ_fail = 1 / 3
+  δ_fail = 2 / 5
   ϵ = 1e-5
   T = trunc(Int, ceil(log2(2 * δ / ϵ)))
   K = trunc(Int, T * (L / (δ_fail * μ))^2)
@@ -42,8 +40,8 @@ function main(d, pfail, δ, ϵ_stop=(sqrt(d) * 1e-15))
     (dist_real = distance_to_solution(problem, x),
      dist_calc = 2.0^(-t) * R,
      iter_ind = t * K * batch_size)
-  # Standard normal distribution
-  D = Distributions.MultivariateNormal(d, 1.0)
+  # Distribution with finite support.
+  D = NormalBatch(randn(d, 8 * d))
   problem = generate_phase_retrieval_problem(D, pfail)
   step_fn = (p, x, α) -> subgradient_step(p, x, α, batch_size=batch_size)
   x₀ = problem.x + δ * normalize(randn(d))
@@ -75,6 +73,9 @@ settings = ArgParseSettings(
     help = "Corruption probability"
     arg_type = Float64
     default = 0.2
+  "--batch-size"
+    help = "Batch size used in each random sample."
+    arg_type = Int
   "--delta"
     help = "Initial normalized distance"
     arg_type = Float64
@@ -87,4 +88,4 @@ end
 
 parsed = parse_args(settings)
 Random.seed!(parsed["seed"])
-main(parsed["d"], parsed["p"], parsed["delta"])
+main(parsed["d"], parsed["p"], parsed["delta"], parsed["batch-size"])

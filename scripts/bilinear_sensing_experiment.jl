@@ -26,12 +26,10 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, ϵ_stop=(sqrt(2 * d) * 1e-15))
-  batch_size = trunc(Int, sqrt(d))
+function main(d, pfail, δ, batch_size, ϵ_stop=(sqrt(2 * d) * 1e-15))
   μ = 1 - 2 * pfail
   L = sqrt(d / batch_size)
-  η = 1.0
-  δ_fail = 1 / 3
+  δ_fail = 2 / 5
   ϵ = 1e-5
   T = trunc(Int, ceil(log2(2 * δ / ϵ)))
   K = trunc(Int, T * (L / (δ_fail * μ))^2)
@@ -42,9 +40,9 @@ function main(d, pfail, δ, ϵ_stop=(sqrt(2 * d) * 1e-15))
     (dist_real = distance_to_solution(problem, z),
      dist_calc = 2.0^(-t) * R,
      iter_ind = t * K * batch_size)
-  # Standard normal distribution
-  DL = Distributions.MultivariateNormal(d, 1.0)
-  DR = Distributions.MultivariateNormal(d, 1.0)
+  # Distributions with finite support.
+  DL = NormalBatch(randn(d, 8 * d))
+  DR = NormalBatch(randn(d, 8 * d))
   problem = generate_bilinear_sensing_problem(DL, DR, pfail)
   step_fn = (p, z, α) -> subgradient_step(p, z, α, batch_size=batch_size)
   w₀ = problem.w + δ * normalize(randn(d))
@@ -77,6 +75,9 @@ settings = ArgParseSettings(
     help = "Corruption probability"
     arg_type = Float64
     default = 0.2
+  "--batch-size"
+    help = "The batch size of each random sample."
+    arg_type = Int
   "--delta"
     help = "Initial normalized distance"
     arg_type = Float64
@@ -89,4 +90,4 @@ end
 
 parsed = parse_args(settings)
 Random.seed!(parsed["seed"])
-main(parsed["d"], parsed["p"], parsed["delta"])
+main(parsed["d"], parsed["p"], parsed["delta"], parsed["batch-size"])

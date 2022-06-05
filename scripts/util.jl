@@ -1,30 +1,67 @@
 import LinearAlgebra: norm, normalize
 import Distributions
+import Random
 
 import GeomStepDecay
 
+struct NormalBatch <: Distributions.Sampleable{
+  Distributions.Multivariate, Distributions.Continuous}
+  vectors::Matrix{Float64}
+end
+
+Base.length(s::NormalBatch) = size(s.vectors, 1)
+
+# Sample a single vector from a `NormalBatch` distribution.
+function Distributions._rand!(
+  rng::Random.AbstractRNG,
+  s::NormalBatch,
+  x::AbstractVector{T}
+) where T <: Real
+  copyto!(x, s.vectors[:, rand(rng, 1:size(s.vectors, 2))])
+  return x
+end
+
+# Sample multiple vectors from a `NormalBatch` distribution.
+function Distributions._rand!(
+  rng::Random.AbstractRNG,
+  s::NormalBatch,
+  A::AbstractMatrix{T}
+) where T <: Real
+  num_vectors = size(s.vectors, 2)
+  num_samples = size(A, 2)
+  if mod(num_vectors, num_samples) == 0
+    num_blocks = num_vectors ÷ num_samples
+    block_idx = rand(rng, 1:num_blocks)
+    A[:, 1:num_samples] .= s.vectors[:, ((block_idx - 1) * num_samples + 1):(block_idx * num_samples)]
+  else
+    inds = rand(rng, 1:num_vectors, num_samples)
+    A[:, 1:num_samples] .= s.vectors[:, inds]
+  end
+  return A
+end
+
 struct PhaseRetrievalProblem <: GeomStepDecay.OptProblem
-  A::Distributions.Distribution
+  A::Distributions.Sampleable
   x::Vector{Float64}
   pfail::Float64
 end
 
 struct BilinearSensingProblem <: GeomStepDecay.OptProblem
-  L::Distributions.Distribution
-  R::Distributions.Distribution
+  L::Distributions.Sampleable
+  R::Distributions.Sampleable
   w::Vector{Float64}
   x::Vector{Float64}
   pfail::Float64
 end
 
 """
-  generate_phase_retrieval_problem(D::Distributions.Distribution, pfail::Float64 = 0.0)
+  generate_phase_retrieval_problem(D::Distributions.Sampleable, pfail::Float64 = 0.0)
 
 Generate a phase retrieval problem with measurement vectors sampled from a
 distribution `D` and a `pfail` fraction of corrupted measurements.
 """
 function generate_phase_retrieval_problem(
-  D::Distributions.Distribution,
+  D::Distributions.Sampleable,
   pfail::Float64 = 0.0,
 )
   d = length(D)
@@ -32,7 +69,7 @@ function generate_phase_retrieval_problem(
 end
 
 """
-  generate_bilinear_sensing_problem(L::Distributions.Distribution, R::Distributions.Distribution,
+  generate_bilinear_sensing_problem(L::Distributions.Sampleable, R::Distributions.Sampleable,
                                     pfail::Float64 = 0.0)
 
 Generate a bilinear sensing problem with measurement vectors sampled from a
@@ -40,8 +77,8 @@ pair of distributions `(L, R)` and a `pfail` fraction of corrupted
 measurements.
 """
 function generate_bilinear_sensing_problem(
-  L::Distributions.Distribution,
-  R::Distributions.Distribution,
+  L::Distributions.Sampleable,
+  R::Distributions.Sampleable,
   pfail::Float64 = 0.0,
 )
   d₁ = length(L)
