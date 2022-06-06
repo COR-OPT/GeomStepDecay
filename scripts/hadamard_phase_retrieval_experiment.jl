@@ -26,7 +26,7 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, num_patterns, ϵ_stop=(sqrt(d) * 1e-15))
+function main(d, pfail, δ, num_patterns, ϵ_stop=(sqrt(d) * 1e-10))
   μ = 1 - 2 * pfail
   L = 1.0
   δ_fail = 0.45
