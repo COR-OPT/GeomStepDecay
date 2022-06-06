@@ -174,9 +174,12 @@ function distance_to_solution(
   z::Vector{Float64},
 )
   d₁ = length(problem.w)
-  w = z[1:d₁]
-  x = z[(d₁+1):end]
-  return norm(w .* x' .- problem.w .* problem.x')
+  d₂ = length(problem.x)
+  w = view(z, 1:d₁)
+  x = view(z, (d₁+1):(d₁+d₂))
+  return sqrt(abs(
+    norm(w)^2 * norm(x)^2 + norm(problem.w)^2 * norm(problem.x)^2 -
+      2 * (w' * problem.w) * (x' * problem.x)))
 end
 
 """
@@ -275,9 +278,9 @@ function subgradient_step(
   ]
 end
 
-opA(S::AbstractMatrix{Int64}, v::Vector{Float64}) = vec(ifwht(S .* v, 1))
+opA(S::AbstractMatrix{Int64}, v::AbstractVector{Float64}) = vec(ifwht(S .* v, 1))
 
-opAT(S::AbstractMatrix{Int64}, v::Vector{Float64}) = begin
+opAT(S::AbstractMatrix{Int64}, v::AbstractVector{Float64}) = begin
   d, k = size(S)
   return (S .* ifwht(reshape(v, d, k), 1)) * ones(k)
 end
@@ -311,11 +314,12 @@ with a given `step_size`.
 function subgradient_step(
   problem::HadamardBilinearSensingProblem,
   z::Vector{Float64},
-  step_size::Float64,
+  step_size::Float64;
 )
   d₁ = length(problem.w)
-  w = z[1:d₁]
-  x = z[(d₁+1):end]
+  d₂ = length(problem.x)
+  w = view(z, 1:d₁)
+  x = view(z, (d₁ + 1):(d₁ + d₂))
   num_patterns = size(problem.sign_patterns_left, 2)
   block_idx = rand(1:num_patterns, 2)
   S₁ = problem.sign_patterns_left[:, block_idx]
@@ -325,16 +329,21 @@ function subgradient_step(
   Lw = opA(S₁, w)
   Rx = opA(S₂, x)
   s = (1 / d₁) .* sign.(Lw .* Rx .- y)
-  g = zeros(length(w) + length(x))
-  g[1:d₁] .= opAT(S₁, Rx .* s)
-  g[(d₁ + 1):end] = opAT(S₂, Lw .* s)
-  return z - step_size * g
+  return z - step_size * [
+    opAT(S₁, Rx .* s);
+    opAT(S₂, Lw .* s)
+  ]
 end
 
 
 # Callback functions for distance to solution.
 distance_callback(
-  problem::Union{PhaseRetrievalProblem, HadamardPhaseRetrievalProblem, BilinearSensingProblem},
+  problem::Union{
+    PhaseRetrievalProblem,
+    HadamardPhaseRetrievalProblem,
+    BilinearSensingProblem,
+    HadamardBilinearSensingProblem
+  },
   z::Vector{Float64},
   _,
 ) = distance_to_solution(problem, z)
