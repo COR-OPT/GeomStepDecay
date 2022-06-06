@@ -26,10 +26,10 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, batch_size, ϵ_stop=(sqrt(2 * d) * 1e-15))
+function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(2 * d) * 1e-15))
   μ = 1 - 2 * pfail
   L = sqrt(d / batch_size)
-  δ_fail = 2 / 5
+  δ_fail = 0.45
   ϵ = 1e-5
   T = trunc(Int, ceil(log2(2 * δ / ϵ)))
   K = trunc(Int, T * (L / (δ_fail * μ))^2)
@@ -39,10 +39,15 @@ function main(d, pfail, δ, batch_size, ϵ_stop=(sqrt(2 * d) * 1e-15))
   callback(problem::BilinearSensingProblem, z::Vector{Float64}, t::Int) =
     (dist_real = distance_to_solution(problem, z),
      dist_calc = 2.0^(-t) * R,
-     iter_ind = t * K * batch_size)
+     iter_ind = t * K * batch_size,
+     passes_over_dataset = streaming ? 0 : (t * K * batch_size / (16 * d)))
   # Distributions with finite support.
-  DL = NormalBatch(randn(d, 8 * d))
-  DR = NormalBatch(randn(d, 8 * d))
+  DL = streaming ?
+    Distributions.MultivariateNormal(fill(1.0, d)) :
+    NormalBatch(randn(d, 8 * d))
+  DR = streaming ?
+    Distributions.MultivariateNormal(fill(1.0, d)) :
+    NormalBatch(randn(d, 8 * d))
   problem = generate_bilinear_sensing_problem(DL, DR, pfail)
   step_fn = (p, z, α) -> subgradient_step(p, z, α, batch_size=batch_size)
   w₀ = problem.w + δ * normalize(randn(d))
@@ -58,10 +63,11 @@ function main(d, pfail, δ, batch_size, ϵ_stop=(sqrt(2 * d) * 1e-15))
     callback,
     stop_condition = (p, x, _) -> (distance_to_solution(p, x) ≤ ϵ_stop),
   )
-  CSV.write(
-    "bilinear_sensing_$(d)_$(@sprintf("%.2f", pfail)).csv",
-    DataFrame(callback_results),
-  )
+  fname = "bilinear_sensing_$(d)_$(batch_size)_$(@sprintf("%.2f", pfail))"
+  if streaming
+    fname *= "_streaming"
+  end
+  CSV.write("$(fname).csv", DataFrame(callback_results))
 end
 
 settings = ArgParseSettings(
@@ -82,6 +88,9 @@ settings = ArgParseSettings(
     help = "Initial normalized distance"
     arg_type = Float64
     default = 0.25
+  "--streaming"
+    help = "Set to use a streaming instead of finite-sample measurement model."
+    action = :store_true
   "--seed"
     help = "The random generator seed."
     arg_type = Int
@@ -90,4 +99,10 @@ end
 
 parsed = parse_args(settings)
 Random.seed!(parsed["seed"])
-main(parsed["d"], parsed["p"], parsed["delta"], parsed["batch-size"])
+main(
+  parsed["d"],
+  parsed["p"],
+  parsed["delta"],
+  parsed["batch-size"],
+  parsed["streaming"],
+)

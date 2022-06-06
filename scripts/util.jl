@@ -32,7 +32,8 @@ function Distributions._rand!(
   if mod(num_vectors, num_samples) == 0
     num_blocks = num_vectors ÷ num_samples
     block_idx = rand(rng, 1:num_blocks)
-    A[:, 1:num_samples] .= s.vectors[:, ((block_idx - 1) * num_samples + 1):(block_idx * num_samples)]
+    A[:, 1:num_samples] .=
+      s.vectors[:, ((block_idx - 1) * num_samples + 1):(block_idx * num_samples)]
   else
     inds = rand(rng, 1:num_vectors, num_samples)
     A[:, 1:num_samples] .= s.vectors[:, inds]

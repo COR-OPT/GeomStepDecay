@@ -26,10 +26,10 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, batch_size, ϵ_stop=(sqrt(d) * 1e-15))
+function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(d) * 1e-15))
   μ = 1 - 2 * pfail
   L = sqrt(d / batch_size)
-  δ_fail = 2 / 5
+  δ_fail = 0.45
   ϵ = 1e-5
   T = trunc(Int, ceil(log2(2 * δ / ϵ)))
   K = trunc(Int, T * (L / (δ_fail * μ))^2)
@@ -39,9 +39,12 @@ function main(d, pfail, δ, batch_size, ϵ_stop=(sqrt(d) * 1e-15))
   callback(problem::PhaseRetrievalProblem, x::Vector{Float64}, t::Int) =
     (dist_real = distance_to_solution(problem, x),
      dist_calc = 2.0^(-t) * R,
-     iter_ind = t * K * batch_size)
+     iter_ind = t * K * batch_size,
+     passes_over_dataset = streaming ? 0 : (t * K * batch_size / (8 * d)))
   # Distribution with finite support.
-  D = NormalBatch(randn(d, 8 * d))
+  D = streaming ?
+    Distributions.MultivariateNormal(fill(1.0, d)) :
+    NormalBatch(randn(d, 8 * d))
   problem = generate_phase_retrieval_problem(D, pfail)
   step_fn = (p, x, α) -> subgradient_step(p, x, α, batch_size=batch_size)
   x₀ = problem.x + δ * normalize(randn(d))
@@ -56,10 +59,11 @@ function main(d, pfail, δ, batch_size, ϵ_stop=(sqrt(d) * 1e-15))
     callback,
     stop_condition = (p, x, _) -> (distance_to_solution(p, x) ≤ ϵ_stop),
   )
-  CSV.write(
-    "phase_retrieval_$(d)_$(@sprintf("%.2f", pfail)).csv",
-    DataFrame(callback_results),
-  )
+  fname = "phase_retrieval_$(d)_$(batch_size)_$(@sprintf("%.2f", pfail))"
+  if streaming
+    fname *= "_streaming"
+  end
+  CSV.write("$(fname).csv", DataFrame(callback_results))
 end
 
 settings = ArgParseSettings(
@@ -72,7 +76,7 @@ settings = ArgParseSettings(
   "--p"
     help = "Corruption probability"
     arg_type = Float64
-    default = 0.2
+    default = 0.0
   "--batch-size"
     help = "Batch size used in each random sample."
     arg_type = Int
@@ -80,6 +84,9 @@ settings = ArgParseSettings(
     help = "Initial normalized distance"
     arg_type = Float64
     default = 0.25
+  "--streaming"
+    help = "Set to use streaming instead of finite-sample measurements."
+    action = :store_true
   "--seed"
     help = "The random generator seed."
     arg_type = Int
@@ -88,4 +95,10 @@ end
 
 parsed = parse_args(settings)
 Random.seed!(parsed["seed"])
-main(parsed["d"], parsed["p"], parsed["delta"], parsed["batch-size"])
+main(
+  parsed["d"],
+  parsed["p"],
+  parsed["delta"],
+  parsed["batch-size"],
+  parsed["streaming"],
+)
