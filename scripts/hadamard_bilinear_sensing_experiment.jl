@@ -26,9 +26,9 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(2 * d) * 1e-15))
+function main(d, pfail, δ, num_patterns, ϵ_stop=(sqrt(2d) * 1e-15))
   μ = 1 - 2 * pfail
-  L = sqrt(2d / batch_size)
+  L = 1
   δ_fail = 0.45
   ϵ = 1e-5
   T = trunc(Int, ceil(log2(2 * δ / ϵ)))
@@ -36,20 +36,13 @@ function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(2 * d) * 1e-15)
   @info "T = $T, K = $K, d = $d"
   R = sqrt(δ) * μ
   α₀ = (R / L) * (1 / sqrt(K + 1))
-  callback(problem::BilinearSensingProblem, z::Vector{Float64}, t::Int) =
+  callback(problem::HadamardBilinearSensingProblem, z::Vector{Float64}, t::Int) =
     (dist_real = distance_to_solution(problem, z),
      dist_calc = 2.0^(-t) * R,
-     iter_ind = t * K * batch_size,
-     passes_over_dataset = streaming ? 0 : (t * K * batch_size / (16 * d)))
-  # Distributions with finite support.
-  DL = streaming ?
-    Distributions.MultivariateNormal(fill(1.0, d)) :
-    NormalBatch(randn(d, 8 * d))
-  DR = streaming ?
-    Distributions.MultivariateNormal(fill(1.0, d)) :
-    NormalBatch(randn(d, 8 * d))
-  problem = generate_bilinear_sensing_problem(DL, DR, pfail)
-  step_fn = (p, z, α) -> subgradient_step(p, z, α, batch_size=batch_size)
+     iter_ind = t * K * d,
+     passes_over_dataset = (t * K / 8))
+  problem = generate_hadamard_bilinear_sensing_problem(d, d, num_patterns, pfail)
+  step_fn = (p, x, α) -> subgradient_step(p, x, α)
   w₀ = problem.w + δ * normalize(randn(d))
   x₀ = problem.x + δ * normalize(randn(d))
   _, callback_results = GeomStepDecay.rmba_template(
@@ -63,15 +56,15 @@ function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(2 * d) * 1e-15)
     callback,
     stop_condition = (p, x, _) -> (distance_to_solution(p, x) ≤ ϵ_stop),
   )
-  fname = "bilinear_sensing_$(d)_$(batch_size)_$(@sprintf("%.2f", pfail))"
-  if streaming
-    fname *= "_streaming"
-  end
-  CSV.write("$(fname).csv", DataFrame(callback_results))
+  fname = "hadamard_bilinear_sensing_$(d)_$(num_patterns)"
+  CSV.write(
+    "$(fname)_$(@sprintf("%.2f", pfail)).csv",
+    DataFrame(callback_results),
+  )
 end
 
 settings = ArgParseSettings(
-  description="Run the stochastic subgradient algorithm on bilinear sensing.",
+  description="Run the stochastic subgradient algorithm on hadamard bilinear sensing.",
 )
 @add_arg_table! settings begin
   "--d"
@@ -80,17 +73,14 @@ settings = ArgParseSettings(
   "--p"
     help = "Corruption probability"
     arg_type = Float64
-    default = 0.2
-  "--batch-size"
-    help = "The batch size of each random sample."
+    default = 0.0
+  "--num-patterns"
+    help = "Number of random sign patterns."
     arg_type = Int
   "--delta"
     help = "Initial normalized distance"
     arg_type = Float64
     default = 0.25
-  "--streaming"
-    help = "Set to use a streaming instead of finite-sample measurement model."
-    action = :store_true
   "--seed"
     help = "The random generator seed."
     arg_type = Int
@@ -103,6 +93,5 @@ main(
   parsed["d"],
   parsed["p"],
   parsed["delta"],
-  parsed["batch-size"],
-  parsed["streaming"],
+  parsed["num-patterns"],
 )

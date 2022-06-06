@@ -63,6 +63,14 @@ struct BilinearSensingProblem <: GeomStepDecay.OptProblem
   pfail::Float64
 end
 
+struct HadamardBilinearSensingProblem <: GeomStepDecay.OptProblem
+  sign_patterns_left::Matrix{Int64}
+  sign_patterns_right::Matrix{Int64}
+  w::Vector{Float64}
+  x::Vector{Float64}
+  pfail::Float64
+end
+
 """
   generate_phase_retrieval_problem(D::Distributions.Sampleable, pfail::Float64 = 0.0)
 
@@ -121,6 +129,27 @@ function generate_bilinear_sensing_problem(
 end
 
 """
+  generate_hadamard_bilinear_sensing_problem(d₁::Int, d₂::Int, num_patterns::Int, pfail::Float64 = 0.0)
+
+Generate a bilinear sensing problem with measurement vectors sampled from the
+randomized Hadamarad ensemble and a `pfail` fraction of corrupted measurements.
+"""
+function generate_hadamard_bilinear_sensing_problem(
+  d₁::Int,
+  d₂::Int,
+  num_patterns::Int,
+  pfail::Float64 = 0.0,
+)
+  return HadamardBilinearSensingProblem(
+    rand([-1, 1], d₁, num_patterns),
+    rand([-1, 1], d₂, num_patterns),
+    normalize(randn(d₁)),
+    normalize(randn(d₂)),
+    pfail,
+  )
+end
+
+"""
   distance_to_solution(problem::Union{PhaseRetrievalProblem, HadamardPhaseRetrievalProblem}, x::Vector{Float64})
 
 Compute the distance of a vector `x` to the solution of `problem`.
@@ -141,10 +170,10 @@ end
 Compute the distance of a vector `z = (w, x)` to the solution of `problem`.
 """
 function distance_to_solution(
-  problem::BilinearSensingProblem,
+  problem::Union{BilinearSensingProblem, HadamardBilinearSensingProblem},
   z::Vector{Float64},
 )
-  d₁ = length(problem.L)
+  d₁ = length(problem.w)
   w = z[1:d₁]
   x = z[(d₁+1):end]
   return norm(w .* x' .- problem.w .* problem.x')
@@ -218,35 +247,6 @@ function subgradient_step(
   return x - step_size * subgrad
 end
 
-function opA(S::AbstractMatrix{Int64}, v::Vector{Float64})
-  return vec(ifwht(S .* v, 1))
-end
-
-function opAT(S::AbstractMatrix{Int64}, v::Vector{Float64})
-  d, k = size(S)
-  return (S .* ifwht(reshape(v, d, k), 1)) * ones(k)
-end
-
-"""
-  subgradient_step(problem::HadamardPhaseRetrievalProblem, x::Vector{Float64}, step_size::Float64)
-
-Take one step of the subgradient method for `problem` starting at `x` with a
-given `step_size`.
-"""
-function subgradient_step(
-  problem::HadamardPhaseRetrievalProblem,
-  x::Vector{Float64},
-  step_size::Float64,
-)
-  d = length(x)
-  num_patterns = size(problem.sign_patterns, 2)
-  S = problem.sign_patterns[:, rand(1:num_patterns, 1)]
-  y = opA(S, problem.x) .^ 2
-  Ax = opA(S, x)
-  subgrad = (2 / d) * opAT(S, sign.(Ax.^2 .- y) .* Ax)
-  return x - step_size * subgrad
-end
-
 """
   subgradient_step(problem::BilinearSensingProblem, z::Vector{Float64}, step_size::Float64;
                    batch_size::Int = 1)
@@ -274,6 +274,63 @@ function subgradient_step(
     (Lw .* R)' * s
   ]
 end
+
+opA(S::AbstractMatrix{Int64}, v::Vector{Float64}) = vec(ifwht(S .* v, 1))
+
+opAT(S::AbstractMatrix{Int64}, v::Vector{Float64}) = begin
+  d, k = size(S)
+  return (S .* ifwht(reshape(v, d, k), 1)) * ones(k)
+end
+
+"""
+  subgradient_step(problem::HadamardPhaseRetrievalProblem, x::Vector{Float64}, step_size::Float64)
+
+Take one step of the subgradient method for `problem` starting at `x` with a
+given `step_size`.
+"""
+function subgradient_step(
+  problem::HadamardPhaseRetrievalProblem,
+  x::Vector{Float64},
+  step_size::Float64,
+)
+  d = length(x)
+  num_patterns = size(problem.sign_patterns, 2)
+  S = problem.sign_patterns[:, rand(1:num_patterns, 1)]
+  y = opA(S, problem.x) .^ 2
+  Ax = opA(S, x)
+  subgrad = (2 / d) * opAT(S, sign.(Ax.^2 .- y) .* Ax)
+  return x - step_size * subgrad
+end
+
+"""
+  subgradient_step(problem::HadamardBilinearSensingProblem, z::Vector{Float64}, step_size::Float64)
+
+Take one step of the subgradient method for `problem` starting at `z = [w; x]`
+with a given `step_size`.
+"""
+function subgradient_step(
+  problem::HadamardBilinearSensingProblem,
+  z::Vector{Float64},
+  step_size::Float64,
+)
+  d₁ = length(problem.w)
+  w = z[1:d₁]
+  x = z[(d₁+1):end]
+  num_patterns = size(problem.sign_patterns_left, 2)
+  block_idx = rand(1:num_patterns, 2)
+  S₁ = problem.sign_patterns_left[:, block_idx]
+  S₂ = problem.sign_patterns_right[:, block_idx]
+  y = opA(S₁, problem.w) .* opA(S₂, problem.x)
+  # Subgradient for the given batch.
+  Lw = opA(S₁, w)
+  Rx = opA(S₂, x)
+  s = (1 / d₁) .* sign.(Lw .* Rx .- y)
+  g = zeros(length(w) + length(x))
+  g[1:d₁] .= opAT(S₁, Rx .* s)
+  g[(d₁ + 1):end] = opAT(S₂, Lw .* s)
+  return z - step_size * g
+end
+
 
 # Callback functions for distance to solution.
 distance_callback(
