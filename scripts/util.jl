@@ -304,7 +304,7 @@ function subgradient_step(
   problem::HadamardPhaseRetrievalProblem,
   x::Vector{Float64},
   step_size::Float64;
-  batch_size::Int = length(x)
+  batch_size::Int = length(problem.x)
 )
   d = length(x)
   num_patterns = size(problem.sign_patterns, 2)
@@ -320,11 +320,9 @@ function subgradient_step(
     ind_hi = block_index * batch_size
     # Binary mask for subrows.
     mask = ind_lo .≤ (1:d) .≤ ind_hi
-    subgrad = (2 / batch_size) * opAT(S, sign.(Ax .^ 2 .- y) .* Ax, mask)
-    return x - step_size * subgrad
+    return x - (2 / batch_size) * opAT(S, sign.(Ax .^ 2 .- y) .* Ax, mask)
   else
-    subgrad = (2 / d) * opAT(S, sign.(Ax.^2 .- y) .* Ax)
-    return x - step_size * subgrad
+    return x - (2 / batch_size) * opAT(S, sign.(Ax.^2 .- y) .* Ax)
   end
 end
 
@@ -338,24 +336,37 @@ function subgradient_step(
   problem::HadamardBilinearSensingProblem,
   z::Vector{Float64},
   step_size::Float64;
+  batch_size::Int = length(problem.w)
 )
   d₁ = length(problem.w)
   d₂ = length(problem.x)
   w = view(z, 1:d₁)
   x = view(z, (d₁ + 1):(d₁ + d₂))
   num_patterns = size(problem.sign_patterns_left, 2)
-  block_idx = rand(1:num_patterns, 2)
+  block_idx = rand(1:num_patterns, 1)
   S₁ = problem.sign_patterns_left[:, block_idx]
   S₂ = problem.sign_patterns_right[:, block_idx]
   y = opA(S₁, problem.w) .* opA(S₂, problem.x)
   # Subgradient for the given batch.
   Lw = opA(S₁, w)
   Rx = opA(S₂, x)
-  s = (1 / d₁) .* sign.(Lw .* Rx .- y)
-  return z - step_size * [
-    opAT(S₁, Rx .* s);
-    opAT(S₂, Lw .* s)
-  ]
+  s = sign.(Lw .* Rx .- y)
+  if batch_size ≠ d₁
+    block_index = rand(1:(d₁ ÷ batch_size))
+    ind_lo = (block_index - 1) * batch_size + 1
+    ind_hi = block_index * batch_size
+    # Binary mask for subrows.
+    mask = ind_lo .≤ (1:d₁) .≤ ind_hi
+    return z - (step_size / batch_size) * [
+      opAT(S₁, Rx .* s, mask);
+      opAT(S₂, Lw .* s, mask)
+    ]
+  else
+    return z - (step_size / batch_size) * [
+      opAT(S₁, Rx .* s);
+      opAT(S₂, Lw .* s)
+    ]
+  end
 end
 
 

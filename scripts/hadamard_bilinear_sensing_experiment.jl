@@ -26,9 +26,9 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, num_patterns, ϵ_stop=(sqrt(2d) * 1e-10))
+function main(d, pfail, δ, num_patterns, batch_size, ϵ_stop=(sqrt(2d) * 1e-10))
   μ = 1 - 2 * pfail
-  L = 1
+  L = (d / batch_size)
   δ_fail = 0.45
   ϵ = 1e-5
   T = trunc(Int, ceil(log2(2 * δ / ϵ)))
@@ -40,7 +40,7 @@ function main(d, pfail, δ, num_patterns, ϵ_stop=(sqrt(2d) * 1e-10))
     (dist_real = distance_to_solution(problem, z),
      dist_calc = 2.0^(-t) * R,
      iter_ind = t * K * d,
-     passes_over_dataset = (t * K / num_patterns))
+     passes_over_dataset = (t * K * batch_size / (num_patterns * d)))
   problem = generate_hadamard_bilinear_sensing_problem(d, d, num_patterns, pfail)
   step_fn = (p, x, α) -> subgradient_step(p, x, α)
   w₀ = problem.w + δ * normalize(randn(d))
@@ -77,6 +77,9 @@ settings = ArgParseSettings(
   "--num-patterns"
     help = "Number of random sign patterns."
     arg_type = Int
+  "--batch-size"
+    help = "The size of each batch of random samples."
+    arg_type = Int
   "--delta"
     help = "Initial normalized distance"
     arg_type = Float64
@@ -94,4 +97,5 @@ main(
   parsed["p"],
   parsed["delta"],
   parsed["num-patterns"],
+  parsed["batch-size"],
 )
