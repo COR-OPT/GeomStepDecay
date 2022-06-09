@@ -285,6 +285,15 @@ opAT(S::AbstractMatrix{Int64}, v::AbstractVector{Float64}) = begin
   return (S .* ifwht(reshape(v, d, k), 1)) * ones(k)
 end
 
+function opAT(
+  S::AbstractMatrix{Int64},
+  v::AbstractVector{Float64},
+  mask::BitVector,
+)
+  d, k = size(S)
+  return (S .* ifwht(reshape(v .* mask, d, k), 1)) * ones(k)
+end
+
 """
   subgradient_step(problem::HadamardPhaseRetrievalProblem, x::Vector{Float64}, step_size::Float64)
 
@@ -294,15 +303,29 @@ given `step_size`.
 function subgradient_step(
   problem::HadamardPhaseRetrievalProblem,
   x::Vector{Float64},
-  step_size::Float64,
+  step_size::Float64;
+  batch_size::Int = length(x)
 )
   d = length(x)
   num_patterns = size(problem.sign_patterns, 2)
   S = problem.sign_patterns[:, rand(1:num_patterns, 1)]
   y = opA(S, problem.x) .^ 2
   Ax = opA(S, x)
-  subgrad = (2 / d) * opAT(S, sign.(Ax.^2 .- y) .* Ax)
-  return x - step_size * subgrad
+  # Take into account batch sizes that are not d.
+  # If the batch size is smaller than d, we find a subblock to use
+  # in the subgradient calculation instead.
+  if batch_size ≠ d
+    block_index = rand(1:(d ÷ batch_size))
+    ind_lo = (block_index - 1) * batch_size + 1
+    ind_hi = block_index * batch_size
+    # Binary mask for subrows.
+    mask = ind_lo .≤ (1:d) .≤ ind_hi
+    subgrad = (2 / batch_size) * opAT(S, sign.(Ax .^ 2 .- y) .* Ax, mask)
+    return x - step_size * subgrad
+  else
+    subgrad = (2 / d) * opAT(S, sign.(Ax.^2 .- y) .* Ax)
+    return x - step_size * subgrad
+  end
 end
 
 """

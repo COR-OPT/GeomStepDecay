@@ -26,9 +26,9 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, num_patterns, ϵ_stop=(sqrt(d) * 1e-10))
+function main(d, pfail, δ, num_patterns, batch_size, ϵ_stop=(sqrt(d) * 1e-10))
   μ = 1 - 2 * pfail
-  L = 1.0
+  L = sqrt(d / batch_size)
   δ_fail = 0.45
   ϵ = 1e-5
   T = trunc(Int, ceil(log2(2 * δ / ϵ)))
@@ -40,9 +40,9 @@ function main(d, pfail, δ, num_patterns, ϵ_stop=(sqrt(d) * 1e-10))
     (dist_real = distance_to_solution(problem, x),
      dist_calc = 2.0^(-t) * R,
      iter_ind = t * K * d,
-     passes_over_dataset = (t * K / num_patterns))
+     passes_over_dataset = (t * K * batch_size / (num_patterns * d)))
   problem = generate_hadamard_phase_retrieval_problem(d, num_patterns, pfail)
-  step_fn = (p, x, α) -> subgradient_step(p, x, α)
+  step_fn = (p, x, α) -> subgradient_step(p, x, α, batch_size=batch_size)
   x₀ = problem.x + δ * normalize(randn(d))
   _, callback_results = GeomStepDecay.rmba_template(
     problem,
@@ -76,6 +76,9 @@ settings = ArgParseSettings(
   "--num-patterns"
     help = "Number of random sign patterns."
     arg_type = Int
+  "--batch-size"
+    help = "The size of each random batch of samples."
+    arg_type = Int
   "--delta"
     help = "Initial normalized distance"
     arg_type = Float64
@@ -93,4 +96,5 @@ main(
   parsed["p"],
   parsed["delta"],
   parsed["num-patterns"],
+  parsed["batch-size"],
 )
