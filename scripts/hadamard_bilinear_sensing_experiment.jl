@@ -64,7 +64,7 @@ function main(d, pfail, δ, num_patterns, batch_size, ϵ_stop=(sqrt(2d) * 1e-10)
     callback,
     stop_condition = stop_condition,
   )
-  fname = "hadamard_bilinear_sensing_$(d)_$(num_patterns)"
+  fname = "hadamard_bilinear_sensing_$(d)_$(num_patterns)_$(batch_size)"
   CSV.write(
     "$(fname)_$(@sprintf("%.2f", pfail)).csv",
     DataFrame(callback_results),
