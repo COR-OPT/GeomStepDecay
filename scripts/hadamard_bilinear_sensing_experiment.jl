@@ -28,7 +28,7 @@ end
 
 function main(d, pfail, δ, num_patterns, batch_size, ϵ_stop=(sqrt(2d) * 1e-10))
   μ = 1 - 2 * pfail
-  L = (d / batch_size)
+  L = sqrt(d / batch_size)
   δ_fail = 0.45
   ϵ = 1e-5
   T = trunc(Int, ceil(log2(2 * δ / ϵ)))
@@ -36,11 +36,19 @@ function main(d, pfail, δ, num_patterns, batch_size, ϵ_stop=(sqrt(2d) * 1e-10)
   @info "T = $T, K = $K, d = $d"
   R = sqrt(δ) * μ
   α₀ = (R / L) * (1 / sqrt(K + 1))
-  callback(problem::HadamardBilinearSensingProblem, z::Vector{Float64}, t::Int) =
+  callback(
+    problem::HadamardBilinearSensingProblem,
+    z::Vector{Float64},
+    k_elapsed::Int,
+    t::Int) =
     (dist_real = distance_to_solution(problem, z),
      dist_calc = 2.0^(-t) * R,
-     iter_ind = t * K * d,
-     passes_over_dataset = (t * K * batch_size / (num_patterns * d)))
+     iter_ind = k_elapsed * batch_size,
+     passes_over_dataset = (k_elapsed * batch_size / (num_patterns * d)))
+  stop_condition(
+    problem::HadamardBilinearSensingProblem,
+    z::Vector{Float64},
+    _::Int) = distance_to_solution(problem, z) ≤ ϵ_stop
   problem = generate_hadamard_bilinear_sensing_problem(d, d, num_patterns, pfail)
   step_fn = (p, x, α) -> subgradient_step(p, x, α)
   w₀ = problem.w + δ * normalize(randn(d))
@@ -54,7 +62,7 @@ function main(d, pfail, δ, num_patterns, batch_size, ϵ_stop=(sqrt(2d) * 1e-10)
     false,
     step_fn,
     callback,
-    stop_condition = (p, x, _) -> (distance_to_solution(p, x) ≤ ϵ_stop),
+    stop_condition = stop_condition,
   )
   fname = "hadamard_bilinear_sensing_$(d)_$(num_patterns)"
   CSV.write(

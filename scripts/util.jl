@@ -320,9 +320,11 @@ function subgradient_step(
     ind_hi = block_index * batch_size
     # Binary mask for subrows.
     mask = ind_lo .≤ (1:d) .≤ ind_hi
-    return x - (2 / batch_size) * opAT(S, sign.(Ax .^ 2 .- y) .* Ax, mask)
+    return x - (2 * step_size / batch_size) *
+      opAT(S, sign.(Ax .^ 2 .- y) .* Ax, mask)
   else
-    return x - (2 / batch_size) * opAT(S, sign.(Ax.^2 .- y) .* Ax)
+    return x - (2 * step_size / batch_size) *
+      opAT(S, sign.(Ax.^2 .- y) .* Ax)
   end
 end
 

@@ -23,6 +23,10 @@ Arguments:
 - `prox_step::Function`: A callable implementing a proximal step of the model.
 - `stop_condition::Function = nothing`: A callable implementing a stopping criterion.
 
+Returns:
+- `x_out::Vector{Float64}`: The vector computed by the MBA algorithm.
+- `stop_time::Int`: The number of MBA iterations elapsed.
+
 Notes:
 1. The `prox_step` callable should accept the problem, current iterate and step size.
 2. The `stop_condition` callable should accept the problem, current iterate and iteration index.
@@ -50,10 +54,10 @@ function mba_template(
     end
     if stop_condition(problem, x₀, k)
       @debug "Stopping early at iteration: $(k)"
-      return x₀
+      return x₀, k
     end
   end
-  return running_avg
+  return running_avg, stop_time
 end
 
 """
@@ -65,7 +69,8 @@ A template for running the restarted MBA (RMBA) algorithm, which invokes
 MBA algorithm `outer_iterations` times for `inner_iterations` each using a
 geometrically decreasing step size in each outer iteration.
 
-Here, `callback(problem, x, it)` is a function invoked in each outer iteration.
+Here, `callback(problem, x, inner_elapsed, it)` is a function invoked in each
+outer iteration.
 """
 function rmba_template(
   problem::OptProblem,
@@ -79,10 +84,11 @@ function rmba_template(
   stop_condition::Union{Function, Nothing}=nothing,
 )
   callback_results = []
+  total_inner_iterations = 0
   for t in 1:outer_iterations
     @debug "Running t = $(t)"
     step = initial_step_size * 2.0^(-(t - 1))
-    x₀ = mba_template(
+    x₀, inner_elapsed = mba_template(
       problem,
       x₀[:],
       step,
@@ -91,7 +97,11 @@ function rmba_template(
       prox_step;
       stop_condition=stop_condition,
     )
-    push!(callback_results, callback(problem, x₀, t))
+    total_inner_iterations += inner_elapsed
+    push!(
+      callback_results,
+      callback(problem, x₀, total_inner_iterations, t),
+    )
     if stop_condition(problem, x₀, t)
       @debug "Stopping early at outer iteration: $(t)"
       return x₀, callback_results
