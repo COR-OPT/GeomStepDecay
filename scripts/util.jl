@@ -278,6 +278,84 @@ function subgradient_step(
   ]
 end
 
+"""
+  proximal_point_step(problem::PhaseRetrievalProblem, x::Vector{Float64}, step_size::Float64)
+
+Take one step of the proximal point method for `problem` starting at `x`
+with a given `step_size`.
+"""
+function proximal_point_step(
+  problem::PhaseRetrievalProblem,
+  x::Vector{Float64},
+  step_size::Float64,
+)
+  A, y = generate_samples(problem, 1)
+  a = A[1, :]
+  b = y[1]
+  ip = a'x
+  a_norm = norm(a)
+  # Possible stationary points.
+  Xs = reshape(
+    [
+      x - ( (2 * step_size * ip) / (2 * step_size * a_norm + 1) ) * a;
+      x - ( (2 * step_size * ip) / (2 * step_size * a_norm - 1) ) * a;
+      x - ( (ip + sqrt(b)) / a_norm ) * a;
+      x - ( (ip - sqrt(b)) / a_norm ) * a
+    ],
+    length(x),
+    4,
+  )
+  # Index yielding the minimum function value.
+  min_idx = argmin(
+    (abs.((a' * Xs).^2 .- b) .+ (1 / (2 * step_size)) .* sum((Xs .- x).^2, dims=1))[:])
+  return Xs[:, min_idx]
+end
+
+# Projection to interval [-1, 1].
+proj_one(x) = min(abs(x), 1) * sign(x)
+
+"""
+  prox_linear_step(problem::PhaseRetrievalProblem, x::Vector{Float64}, step_size::Float64)
+
+Take one step of the prox-linear method for `problem` starting at `x` with a
+given `step_size`.
+"""
+function prox_linear_step(
+  problem::PhaseRetrievalProblem,
+  x::Vector{Float64},
+  step_size::Float64,
+)
+  A, y = generate_samples(problem, 1)
+  a = A[1, :]
+  b = y[1]
+  ip = a'x
+  γ = step_size * (ip^2 - b)
+  ζ = 2 * step_size * ip .* a
+  Δ = proj_one(-γ / (norm(ζ)^2)) .* ζ
+  return x + Δ
+end
+
+_trunc(x, lb, ub) = max(min(x, ub), lb)
+
+"""
+  truncated_step(problem::PhaseRetrievalProblem, x::Vector{Float64}, step_size::Float64)
+
+Take one truncated step for `problem` starting at `x` with a given `step_size`.
+"""
+function truncated_step(
+  problem::PhaseRetrievalProblem,
+  x::Vector{Float64},
+  step_size::Float64,
+)
+  A, y = generate_samples(problem, 1)
+  a = A[1, :]
+  b = y[1]
+  res = (a'x)^2 - b
+  (abs(res) ≤ 1e-15) && return x
+  c = 2 * (a'x) * sign(res) * a
+  return x - step_size * _trunc(abs(res) / (step_size * norm(c)^2), 0, 1.0) * c
+end
+
 opA(S::AbstractMatrix{Int64}, v::AbstractVector{Float64}) = vec(ifwht(S .* v, 1))
 
 opAT(S::AbstractMatrix{Int64}, v::AbstractVector{Float64}) = begin

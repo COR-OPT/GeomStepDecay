@@ -26,7 +26,7 @@ struct TrialResult
   sample_ind::Int
 end
 
-function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(d) * 1e-15))
+function main(d, pfail, δ, batch_size, method, streaming, ϵ_stop=(sqrt(d) * 1e-15))
   μ = 1 - 2 * pfail
   L = sqrt(d / batch_size)
   δ_fail = 0.45
@@ -36,17 +36,32 @@ function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(d) * 1e-15))
   @info "T = $T, K = $K, d = $d"
   R = sqrt(δ) * μ
   α₀ = (R / L) * (1 / sqrt(K + 1))
-  callback(problem::PhaseRetrievalProblem, x::Vector{Float64}, t::Int) =
+  callback(
+    problem::PhaseRetrievalProblem,
+    x::Vector{Float64},
+    k_elapsed::Int,
+    t::Int) =
     (dist_real = distance_to_solution(problem, x),
      dist_calc = 2.0^(-t) * R,
-     iter_ind = t * K * batch_size,
-     passes_over_dataset = streaming ? 0 : (t * K * batch_size / (8 * d)))
+     iter_ind = k_elapsed * batch_size,
+     passes_over_dataset = streaming ? 0 : (k_elapsed * batch_size / (8 * d)))
   # Distribution with finite support.
   D = streaming ?
     Distributions.MultivariateNormal(fill(1.0, d)) :
     NormalBatch(randn(d, 8 * d))
+  @assert (batch_size > 1 && method == "subgradient") || (batch_size == 1) "Batch size > 1 is only available for the subgradient method."
   problem = generate_phase_retrieval_problem(D, pfail)
-  step_fn = (p, x, α) -> subgradient_step(p, x, α, batch_size=batch_size)
+  step_fn = begin
+    if method == "subgradient"
+      (p, x, α) -> subgradient_step(p, x, α, batch_size=batch_size)
+    elseif method == "proximal_point"
+      proximal_point_step
+    elseif method == "prox_linear"
+      prox_linear_step
+    else
+      truncated_step
+    end
+  end
   x₀ = problem.x + δ * normalize(randn(d))
   _, callback_results = GeomStepDecay.rmba_template(
     problem,
@@ -69,10 +84,17 @@ end
 settings = ArgParseSettings(
   description="Run the stochastic subgradient algorithm on phase retrieval.",
 )
+method_choices = [
+  "subgradient",
+  "proximal_point",
+  "prox_linear",
+  "truncated"
+]
 @add_arg_table! settings begin
   "--d"
     help = "Problem dimension"
     arg_type = Int
+    required = true
   "--p"
     help = "Corruption probability"
     arg_type = Float64
@@ -80,6 +102,11 @@ settings = ArgParseSettings(
   "--batch-size"
     help = "Batch size used in each random sample."
     arg_type = Int
+    default = 1
+  "--method"
+    help = "The method used to form the stochastic models."
+    arg_type = String
+    range_tester = (x -> x ∈ method_choices)
   "--delta"
     help = "Initial normalized distance"
     arg_type = Float64
@@ -100,5 +127,6 @@ main(
   parsed["p"],
   parsed["delta"],
   parsed["batch-size"],
+  parsed["method"],
   parsed["streaming"],
 )
