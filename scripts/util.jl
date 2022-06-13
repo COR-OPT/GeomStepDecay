@@ -1,5 +1,6 @@
 import LinearAlgebra: norm, normalize
 import Distributions
+import Polynomials
 import Random
 
 import Hadamard: hadamard, ifwht
@@ -311,6 +312,53 @@ function proximal_point_step(
   return Xs[:, min_idx]
 end
 
+function proximal_point_step(
+  problem::BilinearSensingProblem,
+  z::Vector{Float64},
+  step_size::Float64,
+)
+  d₁ = length(problem.w)
+  d₂ = length(problem.x)
+  w = view(z, 1:d₁)
+  x = view(z, (d₁ + 1):(d₁ + d₂))
+  L, R, y = generate_samples(problem, 1)
+  ℓ = L[1, :]
+  r = R[1, :]
+  b = y[1]
+  ℓ_w = ℓ'w
+  r_x = r'x
+  nrmw_sq = norm(ℓ)^2
+  nrmx_sq = norm(x)^2
+  denom = 1 - step_size^2 * nrmw_sq * nrmx_sq
+  # Case 1: ℓ_w * r_x ≠ b.
+  # Put resulting vectors into separate columns.
+  Ws = hcat(
+    w - step_size * (( r_x - step_size * nrmx_sq * ℓ_w ) / denom) * ℓ,
+    w - step_size * ((-r_x - step_size * nrmx_sq * ℓ_w ) / denom) * ℓ,
+  )
+  Xs = hcat(
+    x - step_size * (( ℓ_w - step_size * nrmw_sq * r_x ) / denom) * r,
+    x - step_size * ((-ℓ_w - step_size * nrmw_sq * ℓ_w ) / denom) * r,
+  )
+  # Case 2: ℓ_w * r_x = b.
+  # Find roots of quartic.
+  p = Polynomials.Polynomial(
+    [-b^2 * nrmw_sq, b * nrmw_sq * r_x, 0.0, nrmx_sq * ℓ_w, nrmx_sq]
+  )
+  ηs = real.(filter(isreal, Polynomials.roots(p)))
+  # Get coefficients.
+  if length(ηs) > 0
+    γs = (ηs .* ℓ_w - ηs.^2) / (b * nrmw_sq)
+    Ws = hcat(Ws, w .- (ℓ .* (γs .* (b ./ ηs))'))
+    Xs = hcat(Xs, x .- (r .* (γs .* ηs)'))
+  end
+  costs = abs.((ℓ' * Ws) .* (r' * Xs) .- b) .+
+    (1 / (2 * step_size)) .*
+      sum((Ws .- w).^2, dims=1) + sum((Xs .- x).^2, dims=1)
+  min_idx = argmin(costs[:])
+  return [Ws[:, min_idx]; Xs[:, min_idx]]
+end
+
 # Projection to interval [-1, 1].
 proj_one(x) = min(abs(x), 1) * sign(x)
 
@@ -335,6 +383,29 @@ function prox_linear_step(
   return x + Δ
 end
 
+"""
+  prox_linear_step(problem::BilinearSensingProblem, z::Vector{Float64}, step_size::Float64)
+
+Take one step of the prox-linear method for `problem` starting at `z = (w, x)`
+with a given `step_size`.
+"""
+function prox_linear_step(
+  problem::BilinearSensingProblem,
+  z::Vector{Float64},
+  step_size::Float64,
+)
+  d₁, d₂ = length(problem.w), length(problem.x)
+  w = view(z, 1:d₁)
+  x = view(z, (d₁ + 1):(d₁ + d₂))
+  L, R, y = generate_samples(problem, 1)
+  ℓ = L[1, :]
+  r = R[1, :]
+  b = y[1]
+  γ = step_size * ((ℓ'w) * (r'x) - b)
+  g = step_size .* [ℓ * (r'x); r * (ℓ'w)]
+  return z .+ proj_one(-γ / (norm(g)^2)) .* g
+end
+
 _trunc(x, lb, ub) = max(min(x, ub), lb)
 
 """
@@ -354,6 +425,32 @@ function truncated_step(
   (abs(res) ≤ 1e-15) && return x
   c = 2 * (a'x) * sign(res) * a
   return x - step_size * _trunc(abs(res) / (step_size * norm(c)^2), 0, 1.0) * c
+end
+
+"""
+  truncated_step(problem::BilinearSensingProblem, z::Vector{Float64}, step_size::Float64)
+
+Take one truncated step for `problem` starting at `z = (w, x)` with a given
+`step_size`.
+"""
+function truncated_step(
+  problem::BilinearSensingProblem,
+  z::Vector{Float64},
+  step_size::Float64,
+)
+  d₁ = length(problem.w)
+  d₂ = length(problem.x)
+  w = view(z, 1:d₁)
+  x = view(z, (d₁ + 1):(d₁ + d₂))
+  L, R, y = generate_samples(problem, 1)
+  ℓ = L[1, :]
+  r = R[1, :]
+  b = y[1]
+  res = (ℓ'w) * (r'x) - b
+  (abs(res) <= 1e-15) && return z
+  g = sign(res) * [(r'x) * ℓ; (ℓ'w) * x]
+	g_fact = _trunc(abs(res) / (step_size * norm(g)^2), 0, 1.0)
+  return z - (step_size * g_fact) .* g
 end
 
 opA(S::AbstractMatrix{Int64}, v::AbstractVector{Float64}) = vec(ifwht(S .* v, 1))
