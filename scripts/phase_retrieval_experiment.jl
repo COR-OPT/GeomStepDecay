@@ -19,14 +19,8 @@ MBLUE="#1d5996"
 HBLUE="#908cc0"
 TTRED="#ca3542"
 
-struct TrialResult
-  dist_real::Float64
-  dist_calc::Float64
-  iter_ind::Int
-  sample_ind::Int
-end
-
 function main(d, pfail, δ, batch_size, method, streaming, ϵ_stop=(sqrt(d) * 1e-15))
+  @assert (batch_size > 1 && method == "subgradient") || (batch_size == 1)
   μ = 1 - 2 * pfail
   L = sqrt(d / batch_size)
   δ_fail = 0.45
@@ -49,7 +43,6 @@ function main(d, pfail, δ, batch_size, method, streaming, ϵ_stop=(sqrt(d) * 1e
   D = streaming ?
     Distributions.MultivariateNormal(fill(1.0, d)) :
     NormalBatch(randn(d, 8 * d))
-  @assert (batch_size > 1 && method == "subgradient") || (batch_size == 1) "Batch size > 1 is only available for the subgradient method."
   problem = generate_phase_retrieval_problem(D, pfail)
   step_fn = begin
     if method == "subgradient"
@@ -78,11 +71,11 @@ function main(d, pfail, δ, batch_size, method, streaming, ϵ_stop=(sqrt(d) * 1e
   if streaming
     fname *= "_streaming"
   end
-  CSV.write("$(fname).csv", DataFrame(callback_results))
+  CSV.write("$(fname)_$(method).csv", DataFrame(callback_results))
 end
 
 settings = ArgParseSettings(
-  description="Run the stochastic subgradient algorithm on phase retrieval.",
+  description="Run the RMBA algorithm on synthetic phase retrieval.",
 )
 method_choices = [
   "subgradient",

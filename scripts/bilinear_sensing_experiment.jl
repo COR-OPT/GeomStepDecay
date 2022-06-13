@@ -19,14 +19,8 @@ MBLUE="#1d5996"
 HBLUE="#908cc0"
 TTRED="#ca3542"
 
-struct TrialResult
-  dist_real::Float64
-  dist_calc::Float64
-  iter_ind::Int
-  sample_ind::Int
-end
-
-function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(2 * d) * 1e-15))
+function main(d, pfail, δ, batch_size, method, streaming, ϵ_stop=(sqrt(2 * d) * 1e-15))
+  @assert (batch_size > 1 && method == "subgradient") || (batch_size == 1)
   μ = 1 - 2 * pfail
   L = sqrt(2d / batch_size)
   δ_fail = 0.45
@@ -36,11 +30,15 @@ function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(2 * d) * 1e-15)
   @info "T = $T, K = $K, d = $d"
   R = sqrt(δ) * μ
   α₀ = (R / L) * (1 / sqrt(K + 1))
-  callback(problem::BilinearSensingProblem, z::Vector{Float64}, t::Int) =
+  callback(
+    problem::BilinearSensingProblem,
+    z::Vector{Float64},
+    k_elapsed::Int,
+    t::Int) =
     (dist_real = distance_to_solution(problem, z),
      dist_calc = 2.0^(-t) * R,
-     iter_ind = t * K * batch_size,
-     passes_over_dataset = streaming ? 0 : (t * K * batch_size / (16 * d)))
+     iter_ind = k_elapsed * batch_size,
+     passes_over_dataset = streaming ? 0 : (k_elapsed * batch_size / (16 * d)))
   # Distributions with finite support.
   DL = streaming ?
     Distributions.MultivariateNormal(fill(1.0, d)) :
@@ -49,7 +47,17 @@ function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(2 * d) * 1e-15)
     Distributions.MultivariateNormal(fill(1.0, d)) :
     NormalBatch(randn(d, 8 * d))
   problem = generate_bilinear_sensing_problem(DL, DR, pfail)
-  step_fn = (p, z, α) -> subgradient_step(p, z, α, batch_size=batch_size)
+  step_fn = begin
+    if method == "subgradient"
+      (p, z, α) -> subgradient_step(p, z, α, batch_size=batch_size)
+    elseif method == "proximal_point"
+      proximal_point_step
+    elseif method == "prox_linear"
+      prox_linear_step
+    else
+      truncated_step
+    end
+  end
   w₀ = problem.w + δ * normalize(randn(d))
   x₀ = problem.x + δ * normalize(randn(d))
   _, callback_results = GeomStepDecay.rmba_template(
@@ -67,16 +75,23 @@ function main(d, pfail, δ, batch_size, streaming, ϵ_stop=(sqrt(2 * d) * 1e-15)
   if streaming
     fname *= "_streaming"
   end
-  CSV.write("$(fname).csv", DataFrame(callback_results))
+  CSV.write("$(fname)_$(method).csv", DataFrame(callback_results))
 end
 
 settings = ArgParseSettings(
-  description="Run the stochastic subgradient algorithm on bilinear sensing.",
+  description="Run the RMBA algorithm on synthetic bilinear sensing.",
 )
+method_choices = [
+  "subgradient",
+  "proximal_point",
+  "prox_linear",
+  "truncated"
+]
 @add_arg_table! settings begin
   "--d"
     help = "Problem dimension"
     arg_type = Int
+    required = true
   "--p"
     help = "Corruption probability"
     arg_type = Float64
@@ -84,6 +99,10 @@ settings = ArgParseSettings(
   "--batch-size"
     help = "The batch size of each random sample."
     arg_type = Int
+    default = 1
+  "--method"
+    help = "The method used to form the stochastic models."
+    arg_type = String
   "--delta"
     help = "Initial normalized distance"
     arg_type = Float64
@@ -104,5 +123,6 @@ main(
   parsed["p"],
   parsed["delta"],
   parsed["batch-size"],
+  parsed["method"],
   parsed["streaming"],
 )
