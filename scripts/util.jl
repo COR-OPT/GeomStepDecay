@@ -44,6 +44,12 @@ function Distributions._rand!(
   return A
 end
 
+struct LeastAbsoluteDeviationProblem <: GeomStepDecay.OptProblem
+  A::Distributions.Sampleable
+  x::Vector{Float64}
+  pfail::Float64
+end
+
 struct PhaseRetrievalProblem <: GeomStepDecay.OptProblem
   A::Distributions.Sampleable
   x::Vector{Float64}
@@ -71,6 +77,16 @@ struct HadamardBilinearSensingProblem <: GeomStepDecay.OptProblem
   x::Vector{Float64}
   pfail::Float64
 end
+
+
+"""
+  generate_least_absolute_deviation_problem(D::Distributions.Sampleable, pfail::Float64 = 0.0)
+"""
+function generate_least_absolute_deviation_problem(D::Distributions.Sampleable, pfail::Float64 = 0.0)
+  d = length(D)
+  return LeastAbsoluteDeviationProblem(D, normalize(randn(d)), pfail)
+end
+
 
 """
   generate_phase_retrieval_problem(D::Distributions.Sampleable, pfail::Float64 = 0.0)
@@ -150,6 +166,13 @@ function generate_hadamard_bilinear_sensing_problem(
   )
 end
 
+function distance_to_solution(
+  problem::LeastAbsoluteDeviationProblem,
+  x::Vector{Float64}
+)
+  return norm(problem.x - x)
+end
+
 """
   distance_to_solution(problem::Union{PhaseRetrievalProblem, HadamardPhaseRetrievalProblem}, x::Vector{Float64})
 
@@ -181,6 +204,19 @@ function distance_to_solution(
   return sqrt(abs(
     norm(w)^2 * norm(x)^2 + norm(problem.w)^2 * norm(problem.x)^2 -
       2 * (w' * problem.w) * (x' * problem.x)))
+end
+
+function generate_samples(
+  problem::LeastAbsoluteDeviationProblem,
+  num_samples::Int,
+)
+  p = problem.pfail
+  vectors = rand(problem.A, num_samples)'
+  measurements = vectors * problem.x
+  # Replace a `p` fraction with large noise.
+  num_rep = trunc(Int, p * num_samples)
+  measurements[1:num_rep] .= 10 * randn(num_rep) .^ 2
+  return vectors, measurements
 end
 
 """
@@ -229,6 +265,16 @@ function generate_samples(
   num_rep = trunc(Int, p * num_samples)
   measurements[1:num_rep] .= 10 .* randn(num_rep)
   return vectors_left, vectors_right, measurements
+end
+
+function subgradient_step(
+  problem::LeastAbsoluteDeviationProblem,
+  x::Vector{Float64},
+  step_size::Float64;
+  batch_size::Int = 1,
+)
+  A, y = generate_samples(problem, batch_size)
+  return x - step_size * A' * sign.(A * x .- y)
 end
 
 """
