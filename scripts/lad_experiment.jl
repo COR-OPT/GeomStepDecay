@@ -19,13 +19,13 @@ MBLUE="#1d5996"
 HBLUE="#908cc0"
 TTRED="#ca3542"
 
-function main(d, pfail, δ, batch_size, method, streaming, ϵ_stop=(sqrt(d) * 1e-15))
+function main(d, inner_iters, pfail, δ, batch_size, method, streaming, ϵ_stop=(sqrt(d) * 1e-15))
   @assert (batch_size > 1 && method == "subgradient") || (batch_size == 1)
   μ = 1 - 2 * pfail
   L = sqrt(d / batch_size)
-  ϵ = 1e-5
+  ϵ = 1e-8
   T = trunc(Int, ceil(log2(2 * δ / ϵ)))
-  K = 1
+  K = inner_iters
   @info "T = $T, K = $K, d = $d"
   R = sqrt(δ) * μ
   α₀ = (R / L) * (1 / sqrt(K + 1))
@@ -35,8 +35,8 @@ function main(d, pfail, δ, batch_size, method, streaming, ϵ_stop=(sqrt(d) * 1e
     k_elapsed::Int,
     t::Int) =
     (dist_real = distance_to_solution(problem, x),
-     dist_calc = 2.0^(-t) * R,
-     dist_fake = R / sqrt(t),
+     dist_calc = 2.0^(-(t - 1)) * R,
+     dist_fake = R / sqrt((t - 1) * inner_iters + t),
      iter_ind = k_elapsed * batch_size,
      passes_over_dataset = streaming ? 0 : (k_elapsed * batch_size / (8 * d)))
   # Distribution with finite support.
@@ -89,6 +89,10 @@ method_choices = [
     help = "Corruption probability"
     arg_type = Float64
     default = 0.0
+  "--inner-iters"
+    help = "Number of inner iterations."
+    arg_type = Int
+    default = 1
   "--batch-size"
     help = "Batch size used in each random sample."
     arg_type = Int
@@ -114,6 +118,7 @@ parsed = parse_args(settings)
 Random.seed!(parsed["seed"])
 main(
   parsed["d"],
+  parsed["inner-iters"],
   parsed["p"],
   parsed["delta"],
   parsed["batch-size"],
