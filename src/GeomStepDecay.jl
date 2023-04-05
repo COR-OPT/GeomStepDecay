@@ -63,7 +63,7 @@ end
 """
   rmba_template(problem::OptProblem, x₀::Vector{Float64}, initial_step_size::Float64,
                 outer_iterations::Int, inner_iterations::Int, is_conv::Bool,
-                prox_step::Function, callback::Function, stop_condition::Function = nothing) -> (x, callback_results)
+                prox_step::Function, callback::Function; stop_condition::Function = nothing) -> (x, callback_results)
 
 A template for running the restarted MBA (RMBA) algorithm, which invokes
 MBA algorithm `outer_iterations` times for `inner_iterations` each using a
@@ -109,6 +109,60 @@ function rmba_template(
   end
   return x₀, callback_results
 end
+
+
+"""
+  rmba_template_doubling(problem::OptProblem, x₀::Vector{Float64}, outer_iterations::Int,
+                         is_conv::Bool, prox_step::Function, callback::Function;
+                         initial_κ::Float64 = 1.0, stop_condition::Function = nothing) -> (x, callback_results)
+
+A template for running the restarted MBA (RMBA) algorithm, which invokes
+the MBA algorithm `outer_iterations` times using a geometrically decreasing
+step size in each outer iteration. This variant uses iterative doubling for
+the number of inner iterations.
+
+Here, `callback(problem, x, inner_elapsed, it)` is a function invoked in each
+outer iteration.
+"""
+function rmba_template_doubling(
+  problem::OptProblem,
+  x₀::Vector{Float64},
+  outer_iterations::Int,
+  is_conv::Bool,
+  prox_step::Function,
+  callback::Function;
+  initial_κ::Float64 = 1.0,
+  stop_condition::Union{Function,Nothing} = nothing,
+)
+  callback_results = []
+  initial_inner_iterations = Int(floor(outer_iterations^2 * initial_κ^2))
+  initial_step_size = 1 / sqrt(initial_inner_iterations + 1)
+  total_inner_iterations = 0
+  for t in 1:outer_iterations
+    step = initial_step_size * 2.0^(-(t - 1))
+    @debug "Running t = $(t) - K = $(initial_inner_iterations * 4.0^(t - 1)) - α = $(step)"
+    x₀, inner_elapsed = mba_template(
+      problem,
+      x₀[:],
+      step,
+      Int(initial_inner_iterations * 4.0^(t - 1)),
+      is_conv,
+      prox_step;
+      stop_condition=stop_condition,
+    )
+    total_inner_iterations += inner_elapsed
+    push!(
+      callback_results,
+      callback(problem, x₀, total_inner_iterations, t),
+    )
+    if stop_condition(problem, x₀, t)
+      @debug "Stopping early at outer iteration: $(t)"
+      return x₀, callback_results
+    end
+  end
+  return x₀, callback_results
+end
+
 
 function pmba_template(
   problem::OptProblem,
