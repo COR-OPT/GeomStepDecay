@@ -19,7 +19,31 @@ MBLUE="#1d5996"
 HBLUE="#908cc0"
 TTRED="#ca3542"
 
-function main(d, inner_iters, pfail, δ, batch_size, method, streaming, ϵ_stop=(sqrt(d) * 1e-15))
+function slow_method(
+  problem::LeastAbsoluteDeviationProblem,
+  x₀::Vector{Float64},
+  T::Int,
+  K::Int,
+  step_fn::Function,
+  η::Float64,
+)
+  x = x₀[:]
+  dist_history = []
+  total_rounds = T * K
+  elapsed = 0
+  for _ in 1:T
+    for _ in 1:K
+      elapsed += 1
+      step_size = (1 / total_rounds)^η
+      x_new = step_fn(problem, x, step_size)
+      x = (elapsed / (elapsed + 1)) * x + (1 / (elapsed + 1)) * x_new
+    end
+    push!(dist_history, norm(problem.x - x))
+  end
+  return dist_history
+end
+
+function main(d, inner_iters, pfail, δ, batch_size, method, streaming, η, ϵ_stop=(sqrt(d) * 1e-15))
   @assert (batch_size > 1 && method == "subgradient") || (batch_size == 1)
   μ = 1 - 2 * pfail
   L = sqrt(d / batch_size)
@@ -36,7 +60,7 @@ function main(d, inner_iters, pfail, δ, batch_size, method, streaming, ϵ_stop=
     t::Int) =
     (dist_real = distance_to_solution(problem, x),
      dist_calc = 2.0^(-(t - 1)) * R,
-     dist_fake = R / sqrt((t - 1) * inner_iters + t),
+     dist_fake = R / sqrt((t - 1) * inner_iters + k_elapsed),
      iter_ind = k_elapsed * batch_size,
      passes_over_dataset = streaming ? 0 : (k_elapsed * batch_size / (8 * d)))
   # Distribution with finite support.
@@ -44,34 +68,28 @@ function main(d, inner_iters, pfail, δ, batch_size, method, streaming, ϵ_stop=
     Distributions.MultivariateNormal(fill(1.0, d)) :
     NormalBatch(randn(d, 8 * d))
   problem = generate_least_absolute_deviation_problem(D, pfail)
-  step_fn = begin
-    if method == "subgradient"
-      (p, x, α) -> subgradient_step(p, x, α, batch_size=batch_size)
-    elseif method == "proximal_point"
-      proximal_point_step
-    elseif method == "prox_linear"
-      prox_linear_step
-    else
-      truncated_step
-    end
-  end
+  step_fn = (p, x, α) -> subgradient_step(p, x, α, batch_size=batch_size)
   x₀ = problem.x + δ * normalize(randn(d))
   _, callback_results = GeomStepDecay.rmba_template(
     problem,
-    x₀,
+    x₀[:],
     α₀,
     5 * T,
     K,
-    false,
+    true,
     step_fn,
     callback,
     stop_condition = (p, x, _) -> (distance_to_solution(p, x) ≤ ϵ_stop),
   )
+  slow_results = slow_method(problem, x₀[:], 5 * T, K, step_fn, η)
   fname = "lad_$(d)_$(batch_size)_$(@sprintf("%.2f", pfail))"
   if streaming
     fname *= "_streaming"
   end
   CSV.write("$(fname)_$(method).csv", DataFrame(callback_results))
+  fname_slow = "lad_$(d)_$(batch_size)_$(@sprintf("%.2f", pfail))_slow"
+  CSV.write("$(fname_slow)_$(method).csv", DataFrame(history=Float64.(slow_results)))
+  @show slow_results
 end
 
 settings = ArgParseSettings(
@@ -105,6 +123,10 @@ method_choices = [
     help = "Initial normalized distance"
     arg_type = Float64
     default = 0.25
+  "--decay-exponent"
+    help = "The exponent for the slowly decaying step schedule."
+    arg_type = Float64
+    default = 0.5
   "--streaming"
     help = "Set to use streaming instead of finite-sample measurements."
     action = :store_true
@@ -124,4 +146,5 @@ main(
   parsed["batch-size"],
   parsed["method"],
   parsed["streaming"],
+  parsed["decay-exponent"],
 )

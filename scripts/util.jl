@@ -210,12 +210,14 @@ function generate_samples(
   problem::LeastAbsoluteDeviationProblem,
   num_samples::Int,
 )
-  p = problem.pfail
   vectors = rand(problem.A, num_samples)'
   measurements = vectors * problem.x
-  # Replace a `p` fraction with large noise.
-  num_rep = trunc(Int, p * num_samples)
-  measurements[1:num_rep] .= 10 * randn(num_rep) .^ 2
+  # Replace an expected `p` fraction with large noise.
+  @inbounds for i in 1:length(measurements)
+    if rand() ≤ problem.pfail
+      measurements[i] = 10 * (randn()^2)
+    end
+  end
   return vectors, measurements
 end
 
