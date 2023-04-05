@@ -140,12 +140,13 @@ function rmba_template_doubling(
   total_inner_iterations = 0
   for t in 1:outer_iterations
     step = initial_step_size * 2.0^(-(t - 1))
-    @debug "Running t = $(t) - K = $(initial_inner_iterations * 4.0^(t - 1)) - α = $(step)"
+    inner_iterations = Int(initial_inner_iterations * 2.0^(t - 1))
+    @debug "Running t = $(t) - K = $(inner_iterations) - α = $(step)"
     x₀, inner_elapsed = mba_template(
       problem,
       x₀[:],
       step,
-      Int(initial_inner_iterations * 4.0^(t - 1)),
+      inner_iterations,
       is_conv,
       prox_step;
       stop_condition=stop_condition,
